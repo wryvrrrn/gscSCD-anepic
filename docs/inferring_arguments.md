@@ -1,5 +1,5 @@
 # Basic Command Argument Reverse-Engineering Guide
-Very fast and loose guide, make sure you understand the .gsc format first (see [Gsc Info](docs/gsc_info.md))
+Very fast and loose guide, make sure you understand the .gsc format first (see [Gsc Info](gsc_info.md))
 
 If you're decompiling your .gsc files and getting orphaned messages or a bunch of nonsense commands (i.e. #0 #0 #0 #0), this generally means your arguments for some commands are incorrect, which is interfering with how the script is interpreting the .gsc file
 
@@ -21,7 +21,7 @@ If you're decompiling your .gsc files and getting orphaned messages or a bunch o
     - (extract the .gsc files from scr.xfl via garBRO/RaiLTools first)
 
 ## Finding problematic commands:
-- This is generally done by first locating known good commands, then searching forward/backward from the command to find a command you know is being interpreted incorrectly (e.g. a correctly read MESSAGE followed by other non-MESSAGE commands, and then later a MESSAGE that isn't read a MESSAGE by the script, so has an orphaned string); (at least) one of the commands in between is probably causing the issue
+- This is generally done by first locating known good commands, then searching forward/backward from the command to find a command you know is being interpreted incorrectly (e.g. a correctly read MESSAGE followed by other non-MESSAGE commands, and then later a MESSAGE that isn't read a as MESSAGE by gscSCD, so has an orphaned string); (at least) one of the commands in between is probably causing the issue
     - the less commands in-between, the easier it is to pinpoint what command is causing the issue
 - Example steps of what might happen when resolving the prior MESSAGE example:
     - first, find the offset for the command for the last known correct MESSAGE (51 00) in a hex editor, and count the argument offset after it (i.e. "iiiiiii" means you shift the offset forward by 4x7=28 bytes)
@@ -42,10 +42,10 @@ If you're decompiling your .gsc files and getting orphaned messages or a bunch o
     - i.e. if the mystery JUMP is pointing to the @4 label, move the label to somewhere else in the file and recompile; if the game jumps to that location, it's a proper JUMP command
 
 ## Locating command offsets:
-- gscSCD ~an epic~ has a lot of commented out debug print commands, including ones that print out the offset for each command parsed
+- gscSCD \~an epic\~ has a lot of commented out debug print commands, including ones that print out the offset for each command parsed
     - uncomment lines flagged with #DEBUG, then run `python3 gscSCD.py > <file name>_log.txt` (to save the terminal output to a file), decompile \<file name> in question, and close the window to save the output
     - debug lines that reference "Reader" refer to a variable in gscSCD used to store the offset of the command being parsed
         - Reader's position is the decimal offset from the start of the Command section
-        - when you see "Reader is at \<position>" before "found Command", that means the two bytes for the command are located at the decimal offset \<position> + \<header length> - 2
+        - when you see "Reader is at \<position>" before "found command", that means the two bytes for the command are located at the decimal offset \<position> + \<header length> - 2
         - (header length is listed on the first line of the decompiled txt file)
     - the debug lines don't print the command arguments (except for MESSAGE, APPEND_MESSAGE, and CHOICE), but you can generally determine which instance of a command is being referred to based on what the surrounding commands are

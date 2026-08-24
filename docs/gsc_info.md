@@ -22,8 +22,8 @@ This contains information regarding the .gsc format itself, as well as how gscSC
 			- String definition section size
 			- ??? (always 4, regardless of engine version)
 			- ??? (always 1, regardless of engine version)
-			- <???> (always 4 if present, for newer engine versions)
-			- <???> (always 1 if present, for newer engine versions)
+			- \<???> (always 4 if present, for newer engine versions)
+			- \<???> (always 1 if present, for newer engine versions)
 		- in gscSCD:
 			- parsed through ReadHeader()
 			- first reads the first 8 bytes via ReadHeader(), which it parses as two signed 32-bit integers ("ii")
@@ -103,7 +103,7 @@ This contains information regarding the .gsc format itself, as well as how gscSC
             - i.e. if JUMP_UNLESS in the example above says to jump to offset 86, the pair would be [1, 86]
         - see gscSCD .txt format below for more info on labels
     - If a command is parsed incorrectly when decompiling (i.e. command has the wrong arguments set), this may cause issues if you add/remove commands when editing the decompiled file 
-        - e.g. what was <COMMAND> <args> <COMMAND_X> gets read as <COMMAND> JUMP <jump offset> -> addition of a new command elsewhere changes offset of JUMP's label -> the jump offset is changed to the new label position -> file gets recompiled into <COMMAND> <args> <COMMAND_Y>
+        - e.g. what was \<COMMAND> \<args> \<COMMAND_X> gets read as \<COMMAND> JUMP \<jump offset> -> addition of a new command elsewhere changes offset of JUMP's label -> the jump offset is changed to the new label position -> file gets recompiled into \<COMMAND> \<args> \<COMMAND_Y>
 
 ## gscSCD functions:
 - DecompileGscToTxt:
@@ -210,7 +210,7 @@ This contains information regarding the .gsc format itself, as well as how gscSC
             - RefreshHeaderPrm()
                 - builds off of the FileParametrs info obtained from the file/generated earlier
                 - sets Sizer (used to determine file size, aka FileParameters[0]) to the header length (FileParametrs[1])
-                - iterates through FileStruct[1] - FileStruct[3] (command, string declaration, string definition section), getting their length and appending it to FileParametrs (so it's now [0, header len, command len, str dec len, str def len, <??? sections set earlier>])
+                - iterates through FileStruct[1] - FileStruct[3] (command, string declaration, string definition section), getting their length and appending it to FileParametrs (so it's now [0, header len, command len, str dec len, str def len, \<??? sections set earlier>])
                 - lastly, adds the length of FileStruct[4] to Sizer to get the total file size, and sets FileParametrs[0] to Sizer
             - RemakeHeaderFromPrm()
                 - sets FileStruct[0] (header) to an empty byte string, then appends each value in FileParametrs (as a signed int (i)) to FileStruct[0]
