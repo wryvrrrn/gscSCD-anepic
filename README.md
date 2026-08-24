@@ -1,7 +1,7 @@
 # gscScriptCompAndDecompiler \~an epic\~
 A tool for decompiling and recompiling .gsc script files for the codeX Rscript engine (used by Liar-soft and Rail-soft).
 
-This is a modified version of the [original gscSCD by TesterTesterov](https://github.com/TesterTesterov/gscScriptCompAndDecompiler/tree/master), made to work with Sapphism no Gensou ~an epic~ (also known as Porthole of Sapphism). However, it should still be perfectly compatible with other games as long as the script's arguments are adjusted to the appropriate values (see gscSCD.py's CommandsLibrary and ConnectedStringsLibrary).
+This is a modified version of the [original gscSCD by TesterTesterov](https://github.com/TesterTesterov/gscScriptCompAndDecompiler/tree/master), made to work with Sapphism no Gensou \~an epic\~ (also known as Porthole of Sapphism). However, it should still be perfectly compatible with other games as long as the script's arguments are adjusted to the appropriate values (see gscSCD.py's CommandsLibrary and ConnectedStringsLibrary).
 
 This version supports variable header lengths (not just 36 bytes) and fixes some bugs (cp932 instead of shift-JIS for character support, incorrectly parsed dialog should now be written to the file). The script's command arguments have been adjusted to work with Sapphism, but newer games should still be compatible if those arguments are changed back to their old values (see gscSCD.py's CommandsLibrary and ConnectedStringsLibrary). However, the rebuilding feature (.gsc -> .gsc) has been removed.
 
