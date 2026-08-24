@@ -14,7 +14,7 @@ If you're decompiling your .gsc files and getting orphaned messages or a bunch o
 ## Finding a scene:
 - Open ProcMon and open the Filter window (ctrl+L or the blue funnel-looking icon)
 - Add two entries:
-    - "Process Name is <game executable>.exe"
+    - "Process Name is \<game executable>.exe"
     - "Path ends with .gsc"
 - Launch your game; when opening the scene in question, ProcMon should print the .gsc files being accessed
     - if there's multiple .gsc files printed in the log, open each of them with a hex editor (wxMEdit with View -> Encoding -> Shift-JIS), and check which .gsc file contains the scene dialog
