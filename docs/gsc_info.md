@@ -1,0 +1,219 @@
+# .gsc File Format Guide
+This contains information regarding the .gsc format itself, as well as how gscSCD handles (de)compilation. These are a slightly cleaned up version of my personal notes on the topic, but hopefully they're understandable enough. It may go too much in detail at points because I'm really not much of a programmer, so a lot of this was new info for me.
+
+
+## General .gsc file structure:
+
+- Is a binary file (so consisting of a sequence of bytes, not human-readable text) encoded in cp932 (extended Shift-JIS) for the text portion
+- The bytes in the file (pair of hex digits, i.e. 0x00 = 1 byte) are read little-endian (because it's Windows) (i.e. a value of 0x1800 would be written in the file as "00 18")
+- The file is composed of multiple sections, placed one after another:
+	- [Header] [Command] [String Declaration Section] [String Definition Section] [Other]
+		- in gscSCD:
+			- the sections are described in FileStructSupport in gscSCD, and are stored in the FileStruct list (one byte string per section)
+	- Header:
+		- Contains info about the file size and the size of the different sections of the file, as described in gscSCD's FileParametrsSupport
+			- Info is stored as a series of signed 32-bit integers ("i", 4 bytes each)
+		- Length varies in engine versions (i.e. 36 in newer versions), but in Sapphism, is 28 bytes long
+		- Header sections, in order (from gscSCD's FileParametrsSupport):
+			- File size: is the bytes of the file size - 1 (for some reason)
+			- Header size
+			- Command section size
+			- String declaration section size
+			- String definition section size
+			- ??? (always 4, regardless of engine version)
+			- ??? (always 1, regardless of engine version)
+			- <???> (always 4 if present, for newer engine versions)
+			- <???> (always 1 if present, for newer engine versions)
+		- in gscSCD:
+			- parsed through ReadHeader()
+			- first reads the first 8 bytes via ReadHeader(), which it parses as two signed 32-bit integers ("ii")
+			- stores the File size and Header size as different values in the FileParametrs list
+			- then it counts the remaining bytes in the header (FileParametrs[1]-8) and splits it into signed 32-bit ints, appending each of the rest of the header sections into FileParametrs
+			- lastly, uses the header length it just obtained from the header to read the entire header and store it in FileStruct[0]
+	- Command:
+		- Consists of a series of opcodes (binary value (in this case a two byte unsigned short) indicating a command the game should excute) followed by arguments for said command
+		- Known opcodes and arguments are listed in CommandLibrary
+		- in gscSCD:
+			- parsed through ReadCommand(), which uses Reader as a position value to read the two byte opcodes (H, unsigned (only positive, higher upper bound) short; stored as "Code"), going one opcode at a time from the end of the Header to the end of the Command section
+			- commands are stored through two arrays, CommandArgs and Commands, referred to via CommandNumber
+				- CommandNumber is just a value that starts from 0 and increments by 1 for each command found (first is 0, second is 1, etc.)
+				- CommandArgs is a 2D list (list of lists) of the arguments that follow a given command (i.e. CommandArgs[0] is the arguments for the first command)
+				- Commands is a list of the found command opcodes (Code) in order (so Commands[0] would be the first command found)
+			- first, checks the opcode to see if it's a known command (loops through CommandsLibrary)
+				- if it is, sets CommandArgsStruct to the known format as listed in CommandsLibrary (i.e. "iii")
+				- if not, infers the arguments for the opcode somehow (idk the logic, ask the author) and sets CommandArgsStruct to this
+					- if the opcode is 0xF000-0xFFFF, infers as hh; if 0x0000-0x0FFF, inferred none; otherwise, infers as hhh
+					- (this inference logic is also hardcoded separately later in DecompileGscToTxt and CompileTxtToGsc (both in the main body and in RedoCommands))
+				- then, breaks the args into its component format characters (i.e. "i" and "i" for "ii"), reads the relevant bytes for each, and stores it in CommandArgs
+			- once the loop is done, does extra verification by checking the reader position against the command section size; two values should be identical
+			- lastly, copies the entirety of the Command section into FileStruct[1]
+	- String Declaration Section:
+		- Is a list of 4-byte values, each of which represents one message; indicates how many bytes into the string definition section (from 0) (the string offset) the message dialog starts
+		- in gscSCD:
+			- parsed through ReadStringDec(), which uses Offset as a position value to seek through the file, storing string offsets in FileStringOffsets
+			- starts seeking from the start of this section (by seeking past the gsc file's header and command sections)
+			- divides the String Declaration section into fourths (bc 4 bytes each), then parses the divided sections each as a signed int and stores them in FileStringOffsets
+			- then goes back to the beginning of the String Declaration Section and puts the whole thing in FileStruct[2]
+	- String Definition Section:
+		- is the actual dialog text (encoded in cp932), separated by a zero byte (\x00)
+		- in gscSCD:
+			- parsed through ReadStringDef(), which uses Offset as a position value; dialog strings are stored in FileStrings
+			Dohod variable is used to get the length of the first string, using the offsets in FileStringOffsets; gets the string offset of the next string (or, if trying to read the last string, uses the length of string definition section instead), then subtracts the string offset of the first string from it to get the first string's length
+			- then reads Dohod - 1 (because of the \x00) bytes decoded as cp932 (the first string, read as Japanese text) and appends it to FileStrings
+			- then, reads 1 more byte just to move past the zero byte, and the process repeats for the rest of the strings in the section
+			- lastly, copies the entirety of the String Definition section into FileStruct[3]
+	- ??? sections are unknown; in gscSCD, are just copied straight into FileStruct[4] (and are then promptly ignored when writing the file)
+		- appear to be just a string of zero-bytes at the end of the file; extra bytes seem to be ignored by the game
+
+## Command Strings:
+- When commands have a string attached to them (i.e. dialog for MESSAGE, choices for CHOICE), some of those message's arguments list the string index (likely referencing the String Declaration Section) for the dialog referenced in the command
+    - essentially just counts up FROM 1 every time it prints a new string in-game (i.e. starts at 1, then 2, 3+4, 5)
+    - for MESSAGE, args seem to be [0, \<voice index>, 0, 0, 0, \<character name>, \<dialog>, 1]
+        - MESSAGEs without character names (i.e. monologues) just have this set as 0 instead (see games other than Sapphism)
+        - sapphism always has this set as 0 as it draws graphics for character names instead (via ^g### in the \<dialog> text)
+        - so, with other games, you may encounter a series of messages like:
+            - [0, 0, 0, 0, 0, 0, 1, 1] (monologue)
+            - [0, 1, 0, 0, 0, 2, 3, 1] (dialog, spoken line)
+            - [0, 2, 0, 0, 0, 4, 5, 1] (dialog, spoken line)
+            - [0, 0, 0, 0, 0, 0, 6, 1] (narration)
+            - [0, 0, 0, 0, 0, 0, 7, 1] (narration)
+    - of course, what arguments contain string indexes depend on the command used
+- In gscSCD:
+    - Are handled through two types of strings, "connected strings" and "orphaned strings"
+    - Connected strings are used when the script knows that the command opcode has a string index as an argument (i.e. MESSAGE or CHOICE), which is handled through ConnectedStringsLibrary
+        - for known connected strings, said argument's value is replaced with -1 (so message always takes the format [0, #, 0, 0, 0, -1, -1, 1]), and the string is written in the decompiled .txt file after the command
+    - Orphaned strings are strings that exist in the String Definition Section, but the commands linked to them are unknown (either the .gsc file was parsed incorrectly due to commands having the wrong arguments defined, or the script wasn't aware that the command's arguments contained a string index)
+        - are just written in the .txt file whenever a discrepancy in the current string index is found (i.e. index jumps from 3 to 6 between MESSAGEs, so script writes strings 4 and 5 before writing the MESSAGE containing 6)
+        - so, strings are printed in the file in order, and decompiled .txt with edited dialog should compile back to a .gsc properly even if the script doesn't define the commands correctly
+        - HOWEVER, this (likely) stops working once you start adding/removing new strings to the file (i.e. splitting a MESSAGE's string in two because the translated text is too long), as the orphaned strings will have a new string index (e.g. will move from being the 3rd line of dialog to the 5th) but the command referencing them will still be referencing the old index (will show the new 3rd line of dialog instead)
+			
+(see gscSCD functions section below on how the script handles it)
+	
+## Commands related to offsets, and labels:
+- Offsets are the distance in bytes from the start of the command section (offset 0 is the beginning of the section, 86 is 86 bytes in, etc.)
+- Some commands (ones relating to advancing dialog out of order, like JUMP or CHOICE) are known to have arguments that refer to offsets, as the game needs to move to a new section of the script
+- In gscSCD:
+    - said commands are listed in the script's ConnectedOffsetsLibrary, which is a 2d list containing pairs of [argument index(es) that refers to an offset]]
+        - (this similar to ConnectedStringsLibrary)
+    - Labels act as markers for the position of said offsets, as adding/removing commands from the file will shift the file structure (i.e. a command located at offset 10 in the original gsc may become 20 in the recompiled gsc)
+        - labels are stored in self.Labels[], which is a 2d list containing pairs of [LabelNumber, Offset]
+        - LabelNumber is just a value starting at 0, incrementing by 1 for each command found that is in ConnectedOffsetsLibrary
+            - i.e. if a file contains a CHOICE, JUMP_UNLESS, CHOICE, and READ_SCENARIO, LabelNumber 0 refers to the first CHOICE, 1 to the JUMP_UNLESS, 2 to the second CHOICE, 3 to READ_SCENARIO
+        - Offset is just the offset said command's argument refers to
+            - i.e. if JUMP_UNLESS in the example above says to jump to offset 86, the pair would be [1, 86]
+        - see gscSCD .txt format below for more info on labels
+    - If a command is parsed incorrectly when decompiling (i.e. command has the wrong arguments set), this may cause issues if you add/remove commands when editing the decompiled file 
+        - e.g. what was <COMMAND> <args> <COMMAND_X> gets read as <COMMAND> JUMP <jump offset> -> addition of a new command elsewhere changes offset of JUMP's label -> the jump offset is changed to the new label position -> file gets recompiled into <COMMAND> <args> <COMMAND_Y>
+
+## gscSCD functions:
+- DecompileGscToTxt:
+    - Executes ReadAll() (runs all the ReadHeader() ReadCommand() etc), closes the gsc file, then writes the txt file
+        - read/close/write is dependent on the string inputted in the field when you DEFINE, appends .gsc, .txt, etc. to it
+
+    - Determining offsets:
+        - first, iterates through all the commands in the file (self.Commands) that were obtained earlier to see if any of the commands are command names that are listed in ConnectedOffsetsLibrary (see Commands related to offsets, and labels earlier for more info)
+        - If the command is known to have arguments that refer to an offset, first checks if the offset the argument refers to already has a label assigned (it's already in self.Labels)
+        - If not, creates a new [LabelNumber, Offset] pair and changes the argument's value from the offset to the LabelNumber
+
+    - Main function body:
+        - Iterates through all the Commands
+        - First, defines the label for the current command in the file (if applicable)
+            - it's related to like, the position in bytes of the current command relative to the start of the command section? (defined as Offset)
+            - if the current command's offset is equal to the second value in one of the labels (as self.Labels is a 2d list, where the lists inside have two values), prints "@\<first value>"
+        - Then, iterates through the entire CommandsLibrary to see if the command being iterated on is there (DontKnow = 0), and has a known command name (DontDef and CommandName)
+            - if the command name is known, set CommandName to it; otherwise just sets CommandName to the command (opcode) itself
+                - this is for printing in the .txt file itself; i.e. #MESSAGE or #51
+                - opcodes are stored in the .txt file as DECIMAL, not hex (i.e. 0x33 would be written as 51)
+        - Then, determines the command's offset (length of command's opcode (2 bytes) and its arguments)
+            - if the command is in CommandsLibrary, determines the offset via the listed arguments (i.e. "h", "iii")
+            - otherwise, does the same inferred arguments logic from earlier, but hardcoded separately (which it does again later too)
+
+        - Everything else:
+            - Checks if the current command has a corresponding entry in ConnectedStringsLibrary; if it does, sets ConStr to 1 and sets CommIndex (formerly kk) to said entry index
+            - And also creates the list StringsNew to store the strings (dialog for MESSAGE, CHOICE selections, etc.) for the current command
+            - Then, iterates through the indexes of the current command's arguments that are known to contain string indexes (ConnectedStringsLibrary[CommIndex][1])
+                - Does so by first getting the command's args (setting to MessageArgsTrue)
+                - Then, iterates through each value in ConnectedStringsLibrary[CommIndex][1], pulling the string index from the argument said value references and storing it in MessageNum
+                    - i.e. when looking at a MESSAGE command ([0x51, [-3, -2]]), first gets the -3rd argument (speaker name), then the -2nd (dialog)
+                    - (-3 means counting from the right, so would be the fifth command argument with "iiiiiii")
+                - Also sets MessageArgsTrue to -1 after, which changes the value of CommandArgs[CommandNumber][self.ConnectedStringsLibrary[CommIndex][1][kkk]] to -1
+                    - this is needed for the script to recognize that the following string is connected to this command
+                    - (see syntax section in README)
+                - Then, appends the string the current argument references (FileStrings[MessageNum]) to StringsNew while replacing every ^n with an actual line break, but doesn't write it to the file yet
+                - If a discrepancy between StringCount and Message (i.e. Message references a higher string index than StringCount), those missing strings are written to the file first (again with ^n replaced with \n) (as strings are written to the String Definition Section in order when compiled)
+                - Then, writes the #COMMAND, >-1, string stuff (one >-1 per string)
+            - If the command doesn't have a string index (at least as known to the script), just writes #\<command name> followed by the arguments to the .txt instead
+            - Lastly, if there's still more commands to parse, adds a new line
+                - If not, checks if there are any strings in the file that aren't referenced and dumps them at the end of the .txt file
+    - Do note that the the script essentially discards the parts of the header that aren't known (ie. the "???" parts), as it doesn't store any info about the .gsc file itself
+- CompileTxtToGsc:
+    - splits the .txt file into separate lines, stores it in Lines
+    - first, retrieves the header info from the file:
+        - checks if the first line starts with ` (header info)
+            - if true, stores the value in the first line in FileParametrs[1] (header length), then the following lines starting with ` in FileParametrs[5+] (???)
+            - then, removes those lines from Lines
+        - otherwise, just goes with default values that seem to work in newer engine versions (FileParametrs[1] = 36, [5+] = 4, 1, 4, 1)
+    - then, iterates through the contents of Lines to find label markers and get their new offsets:
+        - the Offset variable stores the offset of the current line (as it's needed to find the new offset of the label marker)
+        - if line is empty, does nothing and moves to the next line
+        - if line starts with # (command), increments Offset based on the length of the command opcode and its arguments
+            - first looks up whether the command is known (listed in CommandsLibrary by either its name or code)
+            - then, increments Offset by 2 (as command opcodes are 2 bytes long)
+            - if the command is known, gets the length of the arguments in bytes (e.g. 12 for "iii")
+            - if not, infers the argument length using the same logic from before (but hardcoded separately again)
+            - then, adds the argument length to Offset
+        - if line starts with @ (label), checks if the LabelNumber following it refers to a known LabelNumber in self.Labels
+            - if yes, does nothing (this theoretically shouldn't be happening anyway)
+            - if no, adds LabelNumber and Offset to Labels[LenOff] (creating [LabelNumber, Offset] pair)
+            - then, increments LenOff by 1 to prepare for creating another inner list for the next label found
+    - next, handles non-offset stuff:
+        - if line is empty, starts with $ (comment), or starts with @ (label, already processed), skips
+        - if line starts with > (string index), iterates over all the following lines
+            - (increments i too, so the script doesn't check the same lines later)
+            - if the next line is empty and only one line has been checked, ignores it and moves to the next line (presumably to ignore stuff like dialog with no speaker); from the second time onwards, adds a "^n" to the String variable
+            - if the next line is a comment ($), ignore and check the next line
+            - if the next line starts with #/>/@, stop checking
+            - then, adds the current checked line to String, and checks the next line
+            - lastly, appends String to FileStrings (so one entry in FileStrings per message)
+        - if line starts with # (command), first swaps the command name (i.e. MESSAGE) with the actual command number (i.e. 81)
+            - reads it as an int (stored as CommandType), then appends it to self.Commands
+            - then, reads the following line containing the args, splits it into the component arguments (still strings at this point, stored in CommandCTR), then converts the arguments to ints and stores them in CommandNEW (another list) (or just leaves the list empty if there's no args)
+            - Then, checks if the command is one that has arguments related to offsets (i.e. JUMP, CHOICE, etc.) so it can change the argument from the LabelNumber back to the proper offset
+                - iterates through ConnectedOffsetsLibrary to see if the command opcode is a command located in one of its inner lists
+                - if so, gets the value each of its arguments that refer to an offset and checks if it's a known LabelNumber in self.Labels
+                - if it is, sets the value of said argument to the Offset (in self.Labels) instead
+            - Appends the contents of CommandNew to CommandArgs
+            - Then, checks for connected strings:
+                - first, checks if the command is listed in ConnectedStringsLibrary
+                - if so, for each of the arguments that have a connected string, follows the same logic as with lines that start with >; adds the string to FileStrings
+                - then changes the value of the current argument from -1 to the new string index
+                - (this technically adds an extra unneeded zero byte to the file when the line doesn't have a speaker name (since it's now referring to a new index instead of index 0) but like, if it works it works)
+    - Then, starts rebuilding the gsc file (simple enough, only thing to keep an eye out for is the hardcoding)
+        - Starts writing to the .gsc file as a binary file
+        - RedoStrings()
+            - First remakes string offsets (for string declaration section) (RemakeOffsetsFromStrings())
+                - first, adds "0" to the empty list self.FileStringOffsets
+                - then, iterates through each string in self.FileStrings
+                - gets the length of each string (encoded as cp932) + 1 (to account for the zero byte), uses that to increment Dohod
+                - then adds the value of Dohod to FileStringOffsets
+            - Then rewrites the String Declaration Section (RewriteStringDec)
+                - sets FileStruct[2] (string declaration section) to an empty byte string, then reads each value in FileStringOffsets as a 32-bit int (4 bytes) and appends it to FileStruct[2]
+            - Then rewrites the String Definition Section (RewriteStringDef)
+                - sets FileStruct[3] (string declaration section) to an empty byte string, then reads each value in FileStringOffsets (encoded as cp932), adds a zero-byte to it (delimiter), and appends it to FileStruct[3]
+        - RedoCommands()
+            - sets FileStruct[1] (command section) to an empty byte string, then iterates through every command in self.Commands
+            - gets the args for the current command through CommandsLibrary, but if it's not listed, does the same hardcoded inference logic seen multiple times previously
+            - then, packs the command opcode in FileStruct[1] as an unsigned short, followed by its args in the format it just found/derived
+        - RedoRemaining()
+            - just sets FileStruct[4] (??? sections) to 10 zero-bytes (hardcoded; does this work with sapphism?)
+        - RedoHeader()
+            - RefreshHeaderPrm()
+                - builds off of the FileParametrs info obtained from the file/generated earlier
+                - sets Sizer (used to determine file size, aka FileParameters[0]) to the header length (FileParametrs[1])
+                - iterates through FileStruct[1] - FileStruct[3] (command, string declaration, string definition section), getting their length and appending it to FileParametrs (so it's now [0, header len, command len, str dec len, str def len, <??? sections set earlier>])
+                - lastly, adds the length of FileStruct[4] to Sizer to get the total file size, and sets FileParametrs[0] to Sizer
+            - RemakeHeaderFromPrm()
+                - sets FileStruct[0] (header) to an empty byte string, then appends each value in FileParametrs (as a signed int (i)) to FileStruct[0]
+        - RewriteGscFile
+            - just writes each section of FileStruct into the open file
+    - Lastly, prints the file parameters (the header contents but in a human readable format) and closes the file
